@@ -63,6 +63,6 @@ def forward_diffusion(x_0, t, alphas_cumprod):
 
 
 betas, alphas, alphas_cumprod = make_cosine_schedule(T=1000)
-print(betas.shape)          # torch.Size([1000])
-print(alphas_cumprod[0])    # should be close to 1.0
-print(alphas_cumprod[-1])   # should be close to 0.0
+#print(betas.shape)          # torch.Size([1000])
+#print(alphas_cumprod[0])    # should be close to 1.0
+#print(alphas_cumprod[-1])   # should be close to 0.0
