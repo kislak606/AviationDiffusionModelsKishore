@@ -5,3 +5,4 @@ __pycache__/
 *.nc
 *.csv
 checkpoints/
+checkpoints_cfm/
