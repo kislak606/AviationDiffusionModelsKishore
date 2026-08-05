@@ -179,7 +179,7 @@ if __name__ == "__main__":
     visualize_all(
         nc_path    = r"D:\trajectories_adsblol_seq86_stage2.nc",
         ckpt_path  = r"checkpoints\best.pt",
-        output_dir = "predictions_ep100_100k",
+        output_dir = "predictions_ep100_full",
         n_maps     = 6,
         n_show     = 8,
         n_samples  = 20,
