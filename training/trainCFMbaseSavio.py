@@ -47,17 +47,13 @@ def validate(ema_model, val_loader, device, feat_std, max_batches=20):
             preds = euler_sample(ema_model.shadow, obs, t_rel,
                                   n_samples=5, n_steps=20, device=str(device))
 
-            feat_std_xy = torch.tensor(feat_std[:2], device=device)
-
-            preds_xy = preds[..., :2] * feat_std_xy
-            fut_xy   = fut[..., :2]   * feat_std_xy
-
+            feat_std_xy    = torch.tensor(feat_std[:2], device=device)
+            preds_xy       = preds[..., :2] * feat_std_xy
+            fut_xy         = fut[..., :2]   * feat_std_xy
             fde_per_sample = torch.norm(
-                preds_xy[:, :, -1, :] - fut_xy[None, :, -1, :],
-                dim=-1
+                preds_xy[:, :, -1, :] - fut_xy[None, :, -1, :], dim=-1
             )
-
-            min_fde = fde_per_sample.min(dim=0).values.mean()
+            min_fde    = fde_per_sample.min(dim=0).values.mean()
             total_fde += min_fde.item()
             n_batches += 1
 
@@ -82,7 +78,7 @@ def train(
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
     device = torch.device(device if torch.cuda.is_available() else "cpu")
-    print(f"Training on {device}")
+    print(f"Training on {device} — CFM baseline")
 
     train_loader, val_loader, test_loader = get_dataloaders(
         nc_path, batch_size=batch_size, subset=subset,
@@ -100,7 +96,6 @@ def train(
     optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
 
-    # ── Resume ────────────────────────────────────────────────────────────
     start_epoch = 0
     last_ckpt   = output_dir / "last.pt"
     if last_ckpt.exists():
@@ -125,16 +120,14 @@ def train(
             fut   = batch["fut"].to(device)
             t_rel = batch["t_rel"].to(device)
 
-            t = sample_flow_time(obs.shape[0], str(device))
+            t                 = sample_flow_time(obs.shape[0], device=str(device))
             x_t, noise, v_tgt = forward_cfm(fut, t)
-
-            v_pred = model(obs, x_t, t, t_rel)
+            v_pred            = model(obs, x_t, t, t_rel)
 
             fut_len    = fut.shape[1]
             loss_plain = nn.functional.mse_loss(v_pred, v_tgt, reduction="none")
-
-            weights                  = torch.ones(fut_len, device=device)
-            weights[-fut_len // 4:]  = 2.0
+            weights    = torch.ones(fut_len, device=device)
+            weights[-fut_len // 4:] = 2.0
             loss = (loss_plain * weights[None, :, None]).mean()
 
             optimizer.zero_grad()
@@ -155,25 +148,31 @@ def train(
         avg_loss = total_loss / n_batches
         scheduler.step()
 
+        # ── Every epoch: quick rough FDE (5 batches ~320 samples) ─────────
+        rough_fde = validate(ema, val_loader, device, feat_std, max_batches=5)
+
+        # ── Every 5 epochs: proper FDE (20 batches ~1280 samples) ─────────
         if (epoch + 1) % 5 == 0:
-            val_fde = validate(ema, val_loader, device, feat_std, max_batches=20)
-            print(f"Epoch {epoch+1:03d} | loss {avg_loss:.4f} | val minFDE {val_fde:.1f}m")
+            proper_fde = validate(ema, val_loader, device, feat_std, max_batches=20)
+            print(f"Epoch {epoch+1:03d} | loss {avg_loss:.4f} | "
+                  f"rough FDE {rough_fde:.1f}m | proper FDE {proper_fde:.1f}m")
 
             checkpoint = {
                 "epoch":           epoch,
                 "model_state":     model.state_dict(),
                 "ema_state":       ema.shadow.state_dict(),
                 "optimizer_state": optimizer.state_dict(),
-                "val_fde":         val_fde,
+                "val_fde":         proper_fde,
             }
             torch.save(checkpoint, output_dir / "last.pt")
 
-            if val_fde < best_fde:
-                best_fde = val_fde
+            if proper_fde < best_fde:
+                best_fde = proper_fde
                 torch.save(checkpoint, output_dir / "best.pt")
                 print(f"  ✓ best model saved (minFDE {best_fde:.1f}m)")
         else:
-            print(f"Epoch {epoch+1:03d} | loss {avg_loss:.4f}")
+            print(f"Epoch {epoch+1:03d} | loss {avg_loss:.4f} | rough FDE {rough_fde:.1f}m")
+
             checkpoint = {
                 "epoch":           epoch,
                 "model_state":     model.state_dict(),
