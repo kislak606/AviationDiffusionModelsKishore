@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from DataLoaders.ADSBdataset import get_dataloaders
-from models.dit_RoPE_timestamps import TrajectoryDiT    # CHANGED: RoPE-B model
+from models.dit_RoPE_timestamps import TrajectoryDiT
 from models.cfm import sample_flow_time, forward_cfm, euler_sample
 
 
@@ -61,7 +61,7 @@ def validate(ema_model, val_loader, device, feat_std, max_batches=20):
 
 def train(
     nc_path,
-    output_dir   = "checkpoints_rope_b",    # CHANGED: separate checkpoint dir
+    output_dir   = "checkpoints_rope_b",
     epochs       = 100,
     batch_size   = 64,
     lr           = 1e-4,
@@ -119,9 +119,9 @@ def train(
             fut   = batch["fut"].to(device)
             t_rel = batch["t_rel"].to(device)
 
-            t                  = sample_flow_time(obs.shape[0], device=str(device))
-            x_t, noise, v_tgt  = forward_cfm(fut, t)
-            v_pred             = model(obs, x_t, t, t_rel)
+            t                 = sample_flow_time(obs.shape[0], device=str(device))
+            x_t, noise, v_tgt = forward_cfm(fut, t)
+            v_pred            = model(obs, x_t, t, t_rel)
 
             fut_len    = fut.shape[1]
             loss_plain = nn.functional.mse_loss(v_pred, v_tgt, reduction="none")
@@ -147,23 +147,29 @@ def train(
         avg_loss = total_loss / n_batches
         scheduler.step()
 
+        rough_fde = validate(ema, val_loader, device, feat_std, max_batches=5)
+
         if (epoch + 1) % 5 == 0:
-            val_fde = validate(ema, val_loader, device, feat_std, max_batches=20)
-            print(f"Epoch {epoch+1:03d} | loss {avg_loss:.4f} | val minFDE {val_fde:.1f}m")
+            proper_fde = validate(ema, val_loader, device, feat_std, max_batches=20)
+            print(f"Epoch {epoch+1:03d} | loss {avg_loss:.4f} | "
+                  f"rough FDE {rough_fde:.1f}m | proper FDE {proper_fde:.1f}m")
+
             checkpoint = {
                 "epoch":           epoch,
                 "model_state":     model.state_dict(),
                 "ema_state":       ema.shadow.state_dict(),
                 "optimizer_state": optimizer.state_dict(),
-                "val_fde":         val_fde,
+                "val_fde":         proper_fde,
             }
             torch.save(checkpoint, output_dir / "last.pt")
-            if val_fde < best_fde:
-                best_fde = val_fde
+
+            if proper_fde < best_fde:
+                best_fde = proper_fde
                 torch.save(checkpoint, output_dir / "best.pt")
                 print(f"  ✓ best model saved (minFDE {best_fde:.1f}m)")
         else:
-            print(f"Epoch {epoch+1:03d} | loss {avg_loss:.4f}")
+            print(f"Epoch {epoch+1:03d} | loss {avg_loss:.4f} | rough FDE {rough_fde:.1f}m")
+
             checkpoint = {
                 "epoch":           epoch,
                 "model_state":     model.state_dict(),
