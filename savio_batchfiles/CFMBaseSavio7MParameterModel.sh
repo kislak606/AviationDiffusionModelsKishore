@@ -34,7 +34,7 @@ mkdir -p $OUTPUT_DIR
 
 cd /global/scratch/users/kishore26/adsb-diffusion/AviationDiffusionModelsKishore/training
 
-python trainCFMBaseSAVIO.py \
+python trainCFMbaseSavio.py \
     --nc_path $NC_PATH \
     --output_dir $OUTPUT_DIR \
     --epochs 100 \

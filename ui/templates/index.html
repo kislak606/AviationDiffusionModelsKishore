@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AviDiff — Trajectory Prediction Explorer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    /* ── Reset & base ──────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:       #0d1117;
+      --bg2:      #161b22;
+      --bg3:      #21262d;
+      --border:   #30363d;
+      --text:     #e6edf3;
+      --muted:    #8b949e;
+      --accent:   #58a6ff;
+      --green:    #3fb950;
+      --red:      #f85149;
+      --orange:   #d29922;
+      --sidebar:  300px;
+      --radius:   8px;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    }
+    html, body { height: 100%; font-family: var(--font); background: var(--bg); color: var(--text); }
+
+    /* ── Layout ────────────────────────────────────────────────────────────── */
+    #app { display: flex; height: 100vh; overflow: hidden; }
+
+    /* ── Sidebar ───────────────────────────────────────────────────────────── */
+    #sidebar {
+      width: var(--sidebar);
+      min-width: var(--sidebar);
+      background: var(--bg);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #sidebar-header {
+      padding: 16px 16px 12px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    #sidebar-header h1 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--accent);
+    }
+    #sidebar-header p {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* ── Sections ──────────────────────────────────────────────────────────── */
+    .section {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .section-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    /* ── Model selector ────────────────────────────────────────────────────── */
+    #model-list { display: flex; flex-direction: column; gap: 4px; }
+    .model-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.12s;
+    }
+    .model-option:hover:not(.unavailable) { background: var(--bg3); }
+    .model-option.selected { border-color: var(--accent); background: rgba(88,166,255,0.07); }
+    .model-option.unavailable { opacity: 0.4; cursor: not-allowed; }
+    .model-option input[type="radio"] { accent-color: var(--accent); width: 14px; height: 14px; cursor: inherit; }
+    .model-name { font-size: 13px; flex: 1; }
+    .model-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      font-weight: 600;
+    }
+    .badge-ready  { background: rgba(63,185,80,0.15);  color: var(--green); }
+    .badge-avail  { background: rgba(210,153,34,0.15); color: var(--orange); }
+    .badge-na     { background: rgba(139,148,158,0.1); color: var(--muted); }
+    .model-meta   { font-size: 10px; color: var(--muted); margin-top: 1px; }
+
+    /* ── Category tabs ─────────────────────────────────────────────────────── */
+    #cat-tabs {
+      display: flex;
+      padding: 10px 16px 0;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .cat-tab {
+      flex: 1;
+      padding: 6px 0;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius) var(--radius) 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.12s;
+    }
+    .cat-tab:hover { color: var(--text); }
+    .cat-tab.active {
+      background: var(--bg2);
+      color: var(--accent);
+      border-bottom-color: var(--bg2);
+    }
+
+    /* ── Flight list ───────────────────────────────────────────────────────── */
+    #flight-panel {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+    }
+    #flight-search-wrap {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    #flight-search {
+      width: 100%;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 5px 10px;
+      font-size: 12px;
+      outline: none;
+    }
+    #flight-search:focus { border-color: var(--accent); }
+    #flight-search::placeholder { color: var(--muted); }
+    #flight-count {
+      font-size: 10px;
+      color: var(--muted);
+      padding: 4px 12px 2px;
+      flex-shrink: 0;
+    }
+    #flight-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 8px 8px;
+    }
+    #flight-list::-webkit-scrollbar { width: 4px; }
+    #flight-list::-webkit-scrollbar-track { background: transparent; }
+    #flight-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    .flight-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.1s;
+      font-size: 13px;
+    }
+    .flight-item:hover { background: var(--bg3); }
+    .flight-item.selected { background: rgba(88,166,255,0.1); color: var(--accent); }
+    .flight-cs { font-weight: 600; flex: 1; }
+    .flight-ic { font-size: 10px; color: var(--muted); font-family: monospace; }
+
+    /* ── Controls ──────────────────────────────────────────────────────────── */
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .slider-row label { font-size: 11px; color: var(--muted); width: 58px; flex-shrink: 0; }
+    .slider-row input[type="range"] {
+      flex: 1;
+      accent-color: var(--accent);
+      cursor: pointer;
+      height: 3px;
+    }
+    .slider-val { font-size: 12px; font-weight: 600; width: 34px; text-align: right; }
+
+    #predict-btn {
+      width: 100%;
+      padding: 9px;
+      background: var(--accent);
+      color: #0d1117;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.3px;
+      transition: all 0.15s;
+      margin-top: 4px;
+    }
+    #predict-btn:hover { background: #79b8ff; }
+    #predict-btn:disabled { background: var(--bg3); color: var(--muted); cursor: not-allowed; }
+    #predict-btn.loading { background: var(--bg3); color: var(--muted); cursor: wait; }
+
+    /* ── FDE stats ─────────────────────────────────────────────────────────── */
+    #fde-section {
+      padding: 10px 16px 12px;
+      flex-shrink: 0;
+      border-top: 1px solid var(--border);
+    }
+    #fde-placeholder {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      padding: 8px 0;
+    }
+    #fde-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+      display: none;
+    }
+    .fde-cell {
+      background: var(--bg3);
+      border-radius: 6px;
+      padding: 8px 6px;
+      text-align: center;
+    }
+    .fde-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
+    .fde-val   { font-size: 15px; font-weight: 700; margin-top: 3px; }
+    .fde-unit  { font-size: 9px; color: var(--muted); margin-top: 1px; }
+    #fde-min-val  { color: var(--green); }
+    #fde-mean-val { color: var(--accent); }
+    #fde-max-val  { color: var(--orange); }
+    #fde-meta { font-size: 10px; color: var(--muted); text-align: center; margin-top: 6px; }
+
+    /* ── Map ────────────────────────────────────────────────────────────────── */
+    #map-container {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    #map { width: 100%; height: 100%; }
+
+    /* ── Map overlay panels ─────────────────────────────────────────────────── */
+    #map-legend {
+      position: absolute;
+      bottom: 28px;
+      left: 12px;
+      z-index: 800;
+      background: rgba(13,17,23,0.92);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      font-size: 12px;
+      backdrop-filter: blur(4px);
+      display: none;
+    }
+    .legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+    .legend-row:last-child { margin-bottom: 0; }
+    .legend-line { width: 22px; height: 3px; border-radius: 2px; flex-shrink: 0; }
+    .legend-obs  { background: #2166ac; }
+    .legend-gt   { background: #1a9641; }
+    .legend-pred { background: #d7191c; }
+    .legend-text { color: var(--text); }
+
+    #map-loading {
+      position: absolute;
+      inset: 0;
+      background: rgba(13,17,23,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 900;
+      display: none;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #map-info {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 800;
+      background: rgba(13,17,23,0.9);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 12px;
+      font-size: 12px;
+      max-width: 220px;
+      display: none;
+    }
+    #map-info-title { font-weight: 700; color: var(--accent); font-size: 13px; margin-bottom: 3px; }
+    #map-info-sub   { color: var(--muted); font-size: 11px; }
+
+    #nc-warning {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 900;
+      background: rgba(210,153,34,0.15);
+      border: 1px solid var(--orange);
+      color: var(--orange);
+      border-radius: var(--radius);
+      padding: 8px 14px;
+      font-size: 12px;
+      display: none;
+    }
+
+    #horizon-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 2px;
+      margin-bottom: 10px;
+    }
+
+    /* ── Tooltip ────────────────────────────────────────────────────────────── */
+    #tooltip {
+      position: fixed;
+      z-index: 9999;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px 9px;
+      font-size: 11px;
+      color: var(--text);
+      pointer-events: none;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── SIDEBAR ────────────────────────────────────────────────────────────── -->
+  <aside id="sidebar">
+
+    <!-- Header -->
+    <div id="sidebar-header">
+      <h1>AviDiff</h1>
+      <p>Aviation Trajectory Prediction Explorer</p>
+    </div>
+
+    <!-- Model selector -->
+    <div class="section">
+      <div class="section-label">Model</div>
+      <div id="model-list">
+        <div class="model-option unavailable" id="mo-loading">
+          <span class="model-name" style="color:var(--muted);font-size:12px">Loading models…</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Category tabs -->
+    <div id="cat-tabs">
+      <button class="cat-tab active" data-cat="consumer" id="tab-consumer">Commercial</button>
+      <button class="cat-tab"        data-cat="ga"       id="tab-ga">Gen. Aviation</button>
+    </div>
+
+    <!-- Flight panel -->
+    <div id="flight-panel">
+      <div id="flight-search-wrap">
+        <input type="text" id="flight-search" placeholder="Search callsign or ICAO…" autocomplete="off" />
+      </div>
+      <div id="flight-count">—</div>
+      <div id="flight-list"></div>
+    </div>
+
+    <!-- Controls -->
+    <div class="section">
+      <div class="section-label">Prediction Controls</div>
+
+      <div class="slider-row">
+        <label>Horizon</label>
+        <input type="range" id="horizon-slider" min="1" max="500" value="43" step="1" />
+        <span class="slider-val" id="horizon-val">43</span>
+      </div>
+      <div id="horizon-label">
+        <span>1 step</span>
+        <span id="horizon-ar-note" style="color:var(--orange);font-size:10px;display:none">⟳ autoregressive beyond 43</span>
+        <span>500 steps</span>
+      </div>
+
+      <div class="slider-row">
+        <label>Obs pts</label>
+        <input type="range" id="obswin-slider" min="1" max="43" value="43" step="1" />
+        <span class="slider-val" id="obswin-val">43</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px;margin-bottom:10px">
+        Context points fed to model (1–43)
+      </div>
+
+      <div class="slider-row">
+        <label>Samples</label>
+        <input type="range" id="samples-slider" min="10" max="200" value="10" step="5" />
+        <span class="slider-val" id="samples-val">10</span>
+      </div>
+
+      <div class="slider-row" id="steps-row" style="margin-bottom:0">
+        <label>DDIM steps</label>
+        <input type="range" id="steps-slider" min="10" max="200" value="50" step="10" />
+        <span class="slider-val" id="steps-val">50</span>
+      </div>
+      <div id="steps-note" style="font-size:10px;color:var(--muted);margin-top:2px;margin-bottom:6px">
+        Fewer steps = faster, lower quality
+      </div>
+
+      <button id="predict-btn" disabled>Select a flight</button>
+    </div>
+
+    <!-- FDE Stats -->
+    <div id="fde-section">
+      <div class="section-label">Final Displacement Error</div>
+      <div id="fde-placeholder">Run a prediction to see FDE stats.</div>
+      <div id="fde-grid">
+        <div class="fde-cell">
+          <div class="fde-label">Min FDE</div>
+          <div class="fde-val" id="fde-min-val">—</div>
+          <div class="fde-unit">meters</div>
+        </div>
+        <div class="fde-cell">
+          <div class="fde-label">Mean FDE</div>
+          <div class="fde-val" id="fde-mean-val">—</div>
+          <div class="fde-unit">meters</div>
+        </div>
+        <div class="fde-cell">
+          <div class="fde-label">Max FDE</div>
+          <div class="fde-val" id="fde-max-val">—</div>
+          <div class="fde-unit">meters</div>
+        </div>
+      </div>
+      <div id="fde-meta"></div>
+    </div>
+
+  </aside>
+
+  <!-- ── MAP ────────────────────────────────────────────────────────────────── -->
+  <div id="map-container">
+    <div id="map"></div>
+
+    <!-- Loading spinner overlay -->
+    <div id="map-loading">
+      <div class="spinner"></div>
+    </div>
+
+    <!-- Flight info chip -->
+    <div id="map-info">
+      <div id="map-info-title">—</div>
+      <div id="map-info-sub">—</div>
+    </div>
+
+    <!-- Legend (shown after first prediction) -->
+    <div id="map-legend">
+      <div class="legend-row">
+        <div class="legend-line legend-obs"></div>
+        <span class="legend-text">Observation</span>
+      </div>
+      <div class="legend-row">
+        <div class="legend-line legend-gt"></div>
+        <span class="legend-text">Ground truth (43 steps)</span>
+      </div>
+      <div class="legend-row">
+        <div class="legend-line legend-pred"></div>
+        <span class="legend-text">Predictions (within GT)</span>
+      </div>
+      <div class="legend-row" id="legend-ar" style="display:none">
+        <div class="legend-line" style="background:#f0a500;border-top:2px dashed #f0a500;height:0;margin-top:1px"></div>
+        <span class="legend-text" style="color:#f0a500">Autoregressive (beyond GT)</span>
+      </div>
+    </div>
+
+    <!-- NetCDF not found warning -->
+    <div id="nc-warning">
+      ⚠ NetCDF data not loaded — flight list will be empty
+    </div>
+  </div>
+
+</div>
+
+<div id="tooltip"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+const state = {
+  selectedModel:  "ddim",
+  selectedFlight: null,
+  activeCategory: "consumer",
+  flights:        { ga: [], consumer: [] },
+  filteredList:   [],
+  totalHorizon:   43,
+  obsWindow:      43,
+  nSamples:       10,
+  nSteps:         50,
+  lastPrediction: null,
+};
+
+// ── Map setup ────────────────────────────────────────────────────────────────
+const map = L.map("map", {
+  center: [37.6213, -122.3790],  // SFO
+  zoom:   10,
+  zoomControl: true,
+});
+
+L.tileLayer(
+  "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+  { attribution: "© CartoDB", maxZoom: 18 }
+).addTo(map);
+
+// Layer groups for easy clearing
+const obsLayer   = L.layerGroup().addTo(map);
+const gtLayer    = L.layerGroup().addTo(map);
+const predLayer  = L.layerGroup().addTo(map);
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+function fmt(n, decimals = 0) {
+  if (n == null || isNaN(n)) return "—";
+  return n.toLocaleString("en-US", { maximumFractionDigits: decimals });
+}
+
+function showLoading(on) {
+  $("map-loading").style.display = on ? "flex" : "none";
+  $("predict-btn").disabled      = on || !state.selectedFlight;
+  $("predict-btn").classList.toggle("loading", on);
+  if (on) $("predict-btn").textContent = "Running…";
+}
+
+// ── Model list ────────────────────────────────────────────────────────────────
+async function loadModels() {
+  const res  = await fetch("/api/models");
+  const list = await res.json();
+
+  const container = $("model-list");
+  container.innerHTML = "";
+
+  list.forEach(m => {
+    const div = document.createElement("div");
+    div.className = "model-option" +
+      (m.id === state.selectedModel ? " selected" : "") +
+      (!m.available ? " unavailable" : "");
+    div.dataset.id = m.id;
+
+    let badge = "";
+    let meta  = "";
+    if (m.loaded) {
+      badge = `<span class="model-badge badge-ready">Loaded</span>`;
+      const ep  = m.epoch  != null ? `ep ${m.epoch}` : "";
+      const fde = m.val_fde != null ? `FDE ${fmt(m.val_fde)} m` : "";
+      meta = `<div class="model-meta">${[ep, fde].filter(Boolean).join(" · ")}</div>`;
+    } else if (m.available) {
+      badge = `<span class="model-badge badge-avail">Available</span>`;
+    } else {
+      badge = `<span class="model-badge badge-na">No ckpt</span>`;
+    }
+
+    div.innerHTML = `
+      <input type="radio" name="model" value="${m.id}"
+        ${m.id === state.selectedModel ? "checked" : ""}
+        ${!m.available ? "disabled" : ""} />
+      <div style="flex:1">
+        <div class="model-name">${m.name} ${badge}</div>
+        ${meta}
+      </div>
+    `;
+
+    if (m.available) {
+      div.addEventListener("click", () => {
+        state.selectedModel = m.id;
+        document.querySelectorAll(".model-option").forEach(el => el.classList.remove("selected"));
+        div.classList.add("selected");
+        div.querySelector("input").checked = true;
+        // Show DDIM-specific controls only for DDIM
+        const isDDIM = m.id === "ddim";
+        $("steps-row").style.display  = isDDIM ? "flex" : "none";
+        $("steps-note").style.display = isDDIM ? "block" : "none";
+      });
+    }
+
+    container.appendChild(div);
+  });
+}
+
+// ── Flight list ───────────────────────────────────────────────────────────────
+async function loadFlights() {
+  const res = await fetch("/api/flights");
+  const data = await res.json();
+
+  if (data.error) {
+    $("nc-warning").style.display = "block";
+  }
+
+  state.flights = data;
+  renderFlightList();
+}
+
+function renderFlightList() {
+  const cat    = state.activeCategory;
+  const query  = $("flight-search").value.trim().toLowerCase();
+  const all    = state.flights[cat] || [];
+
+  state.filteredList = query
+    ? all.filter(f =>
+        f.label.toLowerCase().includes(query) ||
+        f.icao24.toLowerCase().includes(query))
+    : all;
+
+  $("flight-count").textContent =
+    `${state.filteredList.length} of ${all.length} flights`;
+
+  const container = $("flight-list");
+  container.innerHTML = "";
+
+  // Virtual render: only show first 500 for performance
+  const slice = state.filteredList.slice(0, 500);
+  slice.forEach(f => {
+    const div = document.createElement("div");
+    div.className = "flight-item" + (state.selectedFlight?.id === f.id ? " selected" : "");
+    div.innerHTML = `
+      <span class="flight-cs">${f.label || f.icao24}</span>
+      <span class="flight-ic">${f.icao24.toUpperCase()}</span>
+    `;
+    div.addEventListener("click", () => selectFlight(f));
+    container.appendChild(div);
+  });
+
+  if (state.filteredList.length > 500) {
+    const note = document.createElement("div");
+    note.style.cssText = "font-size:10px;color:var(--muted);text-align:center;padding:6px";
+    note.textContent   = `+ ${state.filteredList.length - 500} more — use search to filter`;
+    container.appendChild(note);
+  }
+}
+
+function selectFlight(f) {
+  state.selectedFlight = f;
+  renderFlightList();
+
+  $("predict-btn").disabled     = false;
+  $("predict-btn").textContent  = "Predict";
+
+  $("map-info").style.display   = "block";
+  $("map-info-title").textContent = f.label || f.icao24;
+  $("map-info-sub").textContent   =
+    `${f.icao24.toUpperCase()} · ${f.category === "consumer" ? "Commercial" : "General Aviation"}`;
+}
+
+// ── Category tabs ─────────────────────────────────────────────────────────────
+document.querySelectorAll(".cat-tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    state.activeCategory = tab.dataset.cat;
+    document.querySelectorAll(".cat-tab").forEach(t => t.classList.remove("active"));
+    tab.classList.add("active");
+    $("flight-search").value = "";
+    renderFlightList();
+  });
+});
+
+// ── Search ────────────────────────────────────────────────────────────────────
+$("flight-search").addEventListener("input", renderFlightList);
+
+// ── Sliders ──────────────────────────────────────────────────────────────────
+function bindSlider(sliderId, valId, stateKey) {
+  const slider = $(sliderId);
+  const label  = $(valId);
+  slider.addEventListener("input", () => {
+    const v = parseInt(slider.value);
+    label.textContent = v;
+    state[stateKey]   = v;
+  });
+}
+bindSlider("horizon-slider", "horizon-val", "totalHorizon");
+bindSlider("obswin-slider",  "obswin-val",  "obsWindow");
+bindSlider("samples-slider", "samples-val", "nSamples");
+bindSlider("steps-slider",   "steps-val",   "nSteps");
+
+// Show autoregressive warning when horizon > 43
+$("horizon-slider").addEventListener("input", () => {
+  const h = parseInt($("horizon-slider").value);
+  $("horizon-ar-note").style.display = h > 43 ? "inline" : "none";
+});
+
+// ── Predict ──────────────────────────────────────────────────────────────────
+$("predict-btn").addEventListener("click", runPrediction);
+
+async function runPrediction() {
+  if (!state.selectedFlight) return;
+
+  showLoading(true);
+  try {
+    const res = await fetch("/api/predict", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        flight_idx:    state.selectedFlight.id,
+        model:         state.selectedModel,
+        n_samples:     state.nSamples,
+        total_horizon: state.totalHorizon,
+        obs_window:    state.obsWindow,
+        n_steps:       state.nSteps,
+      }),
+    });
+
+    const data = await res.json();
+    if (data.error) {
+      alert("Prediction error: " + data.error);
+      return;
+    }
+
+    state.lastPrediction = data;
+    redrawPrediction(data);
+    updateFDE(data.fde, data.elapsed_s, data.model_id, data.total_horizon, data.n_samples);
+    $("map-legend").style.display = "block";
+    const beyondGT = data.total_horizon > (data.gt_steps_available || 43);
+    $("legend-ar").style.display  = beyondGT ? "flex" : "none";
+  } catch (err) {
+    alert("Network error: " + err.message);
+  } finally {
+    showLoading(false);
+    $("predict-btn").textContent = "Predict";
+  }
+}
+
+// ── Map rendering ─────────────────────────────────────────────────────────────
+function redrawPrediction(data) {
+  obsLayer.clearLayers();
+  gtLayer.clearLayers();
+  predLayer.clearLayers();
+
+  const obsEnd      = data.obs.length > 0 ? data.obs[data.obs.length - 1] : null;
+  const gtAvail     = data.gt_steps_available || 43;  // actual GT steps chained
+  const totalH      = data.total_horizon || 43;
+  const nPreds      = data.predictions.length;
+  const predOpacity = Math.max(0.05, Math.min(0.5, 6 / nPreds));
+
+  // ── Observation line — blue ───────────────────────────────────────────────
+  if (data.obs && data.obs.length > 1) {
+    L.polyline(data.obs, { color: "#2166ac", weight: 3, opacity: 0.85 }).addTo(obsLayer);
+    L.circleMarker(data.obs[0], {
+      radius: 4, color: "#2166ac", fillColor: "#2166ac", fillOpacity: 1, weight: 0,
+    }).bindTooltip("Obs start").addTo(obsLayer);
+    L.circleMarker(obsEnd, {
+      radius: 5, color: "#2166ac", fillColor: "#fff", fillOpacity: 0.9, weight: 2,
+    }).bindTooltip(`Obs end (${data.obs_window} pts)`).addTo(obsLayer);
+  }
+
+  // ── Ground truth — green solid up to gtAvail, grey dashed if segment ended ─
+  if (data.future && data.future.length > 0) {
+    const gtPath = obsEnd ? [obsEnd, ...data.future] : data.future;
+    L.polyline(gtPath, { color: "#1a9641", weight: 2.5, opacity: 0.85 }).addTo(gtLayer);
+    const gtEnd = data.future[data.future.length - 1];
+    const gtEndLabel = gtAvail < totalH
+      ? `GT ends at step ${gtAvail} (segment boundary)`
+      : `GT end (step ${gtAvail})`;
+    L.circleMarker(gtEnd, {
+      radius: 5, color: "#1a9641", fillColor: "#1a9641", fillOpacity: 1, weight: 0,
+    }).bindTooltip(gtEndLabel).addTo(gtLayer);
+  }
+
+  // ── Prediction fan ────────────────────────────────────────────────────────
+  data.predictions.forEach((pred) => {
+    if (!pred || pred.length === 0) return;
+    const startPt = obsEnd ? [obsEnd] : [];
+
+    if (totalH <= gtAvail) {
+      // All within GT range — red
+      L.polyline([...startPt, ...pred], {
+        color: "#d7191c", weight: 1.2, opacity: predOpacity,
+      }).addTo(predLayer);
+    } else {
+      // Within-GT portion (red), beyond-GT portion (orange dashed)
+      const withinGT = pred.slice(0, gtAvail);
+      const beyondGT = pred.slice(gtAvail - 1);   // overlap 1 for continuity
+      if (withinGT.length > 0) {
+        L.polyline([...startPt, ...withinGT], {
+          color: "#d7191c", weight: 1.2, opacity: predOpacity,
+        }).addTo(predLayer);
+      }
+      if (beyondGT.length > 1) {
+        L.polyline(beyondGT, {
+          color: "#f0a500", weight: 1.2, opacity: predOpacity,
+          dashArray: "4 4",
+        }).addTo(predLayer);
+      }
+    }
+  });
+
+  // ── Fit map ───────────────────────────────────────────────────────────────
+  const allPts = [
+    ...(data.obs || []),
+    ...(data.future || []),
+    ...data.predictions.flat(),
+  ].filter(Boolean);
+  if (allPts.length > 1) {
+    map.fitBounds(L.latLngBounds(allPts), { padding: [40, 40] });
+  }
+}
+
+// ── FDE display ───────────────────────────────────────────────────────────────
+function updateFDE(fde, elapsed, modelId, horizon, nSamples) {
+  $("fde-placeholder").style.display = "none";
+  $("fde-grid").style.display        = "grid";
+
+  $("fde-min-val").textContent  = fmt(fde.min);
+  $("fde-mean-val").textContent = fmt(fde.mean);
+  $("fde-max-val").textContent  = fmt(fde.max);
+
+  const modelName = document.querySelector(`.model-option[data-id="${modelId}"] .model-name`)
+    ?.textContent?.split(" ")[0] || modelId;
+  const fdeStep = fde.at_step || Math.min(state.totalHorizon, 43);
+  const gtNote  = fde.has_gt === false ? " (no GT beyond 43)" : "";
+  $("fde-meta").textContent =
+    `${modelName} · ${nSamples} samples · FDE@step${fdeStep}${gtNote} · ${elapsed.toFixed(1)}s`;
+}
+
+// ── Status check ──────────────────────────────────────────────────────────────
+async function checkStatus() {
+  const res  = await fetch("/api/status");
+  const data = await res.json();
+  if (!data.nc_loaded) {
+    $("nc-warning").style.display = "block";
+    $("nc-warning").textContent   =
+      `⚠ NetCDF not found at: ${data.nc_path}`;
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async () => {
+  await checkStatus();
+  await loadModels();
+  await loadFlights();
+})();
+</script>
+</body>
+</html>
