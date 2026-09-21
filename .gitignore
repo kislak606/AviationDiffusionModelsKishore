@@ -6,3 +6,4 @@ __pycache__/
 *.csv
 checkpoints/
 checkpoints_cfm/
+checkpoints_cfm_kevin_dit/
