@@ -133,8 +133,8 @@ def visualize_all(
 
     # ── Load data ONCE ────────────────────────────────────────────────────
     print("Loading data...")
-    _, val_loader, _ = get_dataloaders(nc_path, batch_size=n_show, subset=10_000)
-    loader_iter = iter(val_loader)
+    _, _, test_loader = get_dataloaders(nc_path, batch_size=n_show, subset=10_000)
+    loader_iter = iter(test_loader)
 
     # ── Load model ONCE ───────────────────────────────────────────────────
     print("Loading model...")

@@ -20,11 +20,12 @@ def load_netcdf(filepath):
     return trajectory, timestamps, icao24, stats
 
 
-def split_by_icao(icao24, train_frac=0.85, val_frac=0.10):
-    # sorted: set order depends on per-process string hashing, which would make
-    # the seeded shuffle (and therefore the split) differ between runs/resumes
+def split_by_icao(icao24, train_frac=0.85, val_frac=0.10, seed=42):
+    # Sort before shuffling: set iteration order depends on PYTHONHASHSEED, which would
+    # make the split differ between processes (training vs. UI/eval) and leak train
+    # flights into the test set.
     unique_icao = sorted(set(icao24))
-    np.random.shuffle(unique_icao)
+    np.random.RandomState(seed).shuffle(unique_icao)
     n       = len(unique_icao)
     n_train = int(n * train_frac)
     n_val   = int(n * val_frac)
@@ -81,7 +82,7 @@ def get_dataloaders(filepath, batch_size=64, obs_len=43, seed=42, subset=None):
         timestamps = timestamps[:subset]
         icao24     = icao24[:subset]
 
-    train_idx, val_idx, test_idx = split_by_icao(icao24)
+    train_idx, val_idx, test_idx = split_by_icao(icao24, seed=seed)
 
     train_ds = TrajectoryDataset(trajectory, timestamps, train_idx, stats, obs_len)
     val_ds   = TrajectoryDataset(trajectory, timestamps, val_idx,   stats, obs_len)

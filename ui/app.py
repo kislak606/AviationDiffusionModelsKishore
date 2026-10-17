@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 from models.dit import TrajectoryDiT
 from models.ddim import make_cosine_schedule
 from models.cfm import euler_sample as cfm_euler_sample
+from DataLoaders.ADSBdataset import split_by_icao
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -31,8 +32,11 @@ app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 NC_PATH = os.environ.get("NC_PATH", str(ROOT / "trajectories_adsblol_seq86_stage2.nc"))
-MAX_FLIGHTS = int(os.environ.get("MAX_FLIGHTS", "5000"))
-DEVICE      = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+MAX_FLIGHTS = int(os.environ.get("MAX_FLIGHTS", "5000"))   # cap on listed TEST flights
+# Must match the `subset` / `seed` the checkpoints were trained with, so the test split is identical.
+SPLIT_SUBSET = int(os.environ.get("SPLIT_SUBSET", "100000")) or None
+SPLIT_SEED   = int(os.environ.get("SPLIT_SEED", "42"))
+DEVICE     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 MODEL_REGISTRY = {
     "ddim": {
@@ -130,7 +134,12 @@ def load_data() -> None:
     import netCDF4 as nc_lib
     ds = nc_lib.Dataset(str(nc_path), "r")
 
-    N = min(len(ds["trajectory"]), MAX_FLIGHTS)
+    # Load the same rows training saw (first SPLIT_SUBSET), then apply the identical
+    # ICAO-based split so we can restrict the UI to held-out TEST flights only.
+    N = len(ds["trajectory"]) if SPLIT_SUBSET is None else min(len(ds["trajectory"]), SPLIT_SUBSET)
+    icao_for_split = list(ds["icao24"][:])[:N]
+    _, _, test_idx = split_by_icao(icao_for_split, seed=SPLIT_SEED)
+    test_idx = test_idx[:MAX_FLIGHTS]
     # Trajectory stores ABSOLUTE x,y,z,vx,vy,vz positions in meters from SFO
     traj_raw   = ds["trajectory"][:N].astype(np.float32)   # (N, 86, 6)
     timestamps = ds["timestamps"][:N].astype(np.float64)   # (N, 86)
@@ -154,8 +163,9 @@ def load_data() -> None:
             "category": categories[i],
             "label":    callsign_raw[i] if callsign_raw[i] else icao24_raw[i],
         }
-        for i in range(N)
+        for i in test_idx
     ]
+    test_set = set(test_idx)
 
     _data = {
         "traj_raw":    traj_raw,      # (N, 86, 6) absolute x,y,z,vx,vy,vz, NOT normalized
@@ -169,11 +179,13 @@ def load_data() -> None:
         "offset":      nc_offset,
         "categories":  categories,
         "flight_list": flight_list,
-        "n": N,
+        "n": N,              # total rows loaded (needed to chain windows); only test_set is selectable
+        "test_set": test_set,
     }
-    n_consumer = sum(1 for c in categories if c == "consumer")
-    n_ga       = N - n_consumer
-    log.info("Loaded %d flights  (consumer=%d  GA=%d)", N, n_consumer, n_ga)
+    n_consumer = sum(1 for f in flight_list if f["category"] == "consumer")
+    n_ga       = len(flight_list) - n_consumer
+    log.info("Loaded %d rows; exposing %d TEST-split flights  (consumer=%d  GA=%d)",
+             N, len(flight_list), n_consumer, n_ga)
 
 
 # ── Model loading ──────────────────────────────────────────────────────────────
@@ -278,7 +290,8 @@ def api_status():
     return jsonify({
         "nc_loaded": _data is not None,
         "nc_path":   NC_PATH,
-        "n_flights": _data["n"] if _data else 0,
+        "n_flights": len(_data["flight_list"]) if _data else 0,
+        "split":     "test",
         "device":    str(DEVICE),
     })
 
@@ -385,8 +398,8 @@ def api_predict():
     obs_window     = max(1,  min(int(body.get("obs_window",   43)),   43))
     n_steps        = max(10, min(int(body.get("n_steps",      50)),  200))
 
-    if not (0 <= flight_idx < _data["n"]):
-        return jsonify({"error": "Invalid flight_idx"}), 400
+    if flight_idx not in _data["test_set"]:
+        return jsonify({"error": "flight_idx is not in the held-out test split"}), 400
 
     mi = load_model(model_id)
     if mi is None:
@@ -527,11 +540,16 @@ if __name__ == "__main__":
     parser.add_argument("--nc",   default=NC_PATH, help="Path to .nc file")
     parser.add_argument("--port", default=5000, type=int)
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--max-flights", default=MAX_FLIGHTS, type=int)
+    parser.add_argument("--max-flights", default=MAX_FLIGHTS, type=int, help="Max TEST flights to list")
+    parser.add_argument("--subset", default=SPLIT_SUBSET or 0, type=int,
+                        help="Row subset used at training time (0 = all); must match for an identical test split")
+    parser.add_argument("--seed", default=SPLIT_SEED, type=int)
     args = parser.parse_args()
 
-    NC_PATH     = args.nc
-    MAX_FLIGHTS = args.max_flights
+    NC_PATH      = args.nc
+    MAX_FLIGHTS  = args.max_flights
+    SPLIT_SUBSET = args.subset or None
+    SPLIT_SEED   = args.seed
 
     load_data()
     log.info("Pre-loading DDIM model…")
