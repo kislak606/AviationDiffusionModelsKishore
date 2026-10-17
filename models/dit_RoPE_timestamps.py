@@ -173,8 +173,13 @@ class TrajectoryDiT(nn.Module):
                  d_model  = 256,
                  n_heads  = 8,
                  n_layers = 6,
-                 dropout  = 0.1):
+                 dropout  = 0.1,
+                 pos_scale = 30.0):
         super().__init__()
+        # t_rel is z-scored (1 unit ~ t_rel_std ~ 90 s), which squeezes a whole window
+        # into ~3 units. RoPE frequencies assume ~1 unit per token, so rescale by
+        # t_rel_std / dt_mean (~89.8 / 3.0 ~ 30) to get ~1 unit per average sample gap.
+        self.pos_scale = pos_scale
         self.obs_len = obs_len
         self.fut_len = fut_len
         seq_len      = obs_len + fut_len
@@ -224,7 +229,7 @@ class TrajectoryDiT(nn.Module):
         # positions = t_rel (B, 86) — real timestamps per sample
         # each token's rotation angle reflects its actual time offset
         # so attention between tokens encodes real time gaps
-        positions = t_rel   # (B, 86)
+        positions = t_rel * self.pos_scale   # (B, 86), ~1 unit per average sample gap
 
         # Step 3: AdaLN conditioning from diffusion/flow time
         cond = self.tflow_mlp(
