@@ -28,11 +28,11 @@ python -c "import torch; print('CUDA available:', torch.cuda.is_available()); pr
 # Training run
 # ---------------------------------------------------------------------------
 NC_PATH=/global/scratch/users/kishore26/adsb-diffusion/data/trajectories_adsblol_seq86_stage2.nc
-OUTPUT_DIR=/global/scratch/users/kishore26/adsb-diffusion/checkpoints_cfm_rope_ts
+OUTPUT_DIR=$HOME/checkpoints_cfm_rope_ts
 
 mkdir -p $OUTPUT_DIR
 
-cd /global/scratch/users/kishore26/adsb-diffusion/AviationDiffusionModelsKishore/training
+cd $HOME/AviationDiffusionModelsKishore/training
 
 python trainCFMRoPEtimestampsSavio.py \
     --nc_path $NC_PATH \
