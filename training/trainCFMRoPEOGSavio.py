@@ -127,4 +127,105 @@ def train(
             if best_val is not None:
                 best_fde = best_val
 
-        print(f"Resumed at
+        print(f"Resumed at epoch {start_epoch} | "
+              f"LR {optimizer.param_groups[0]['lr']:.2e} | "
+              f"best FDE so far {best_fde:.1f}m")
+    # ─────────────────────────────────────────────────────────────────────
+
+    for epoch in range(start_epoch, epochs):
+        model.train()
+        total_loss = 0.0
+        n_batches  = 0
+
+        for batch in train_loader:
+            obs   = batch["obs"].to(device)
+            fut   = batch["fut"].to(device)
+            t_rel = batch["t_rel"].to(device)
+
+            t                 = sample_flow_time(obs.shape[0], device=str(device))
+            x_t, noise, v_tgt = forward_cfm(fut, t)
+            v_pred            = model(obs, x_t, t, t_rel)
+
+            fut_len    = fut.shape[1]
+            loss_plain = nn.functional.mse_loss(v_pred, v_tgt, reduction="none")
+            weights    = torch.ones(fut_len, device=device)
+            weights[-fut_len // 4:] = 2.0
+            loss = (loss_plain * weights[None, :, None]).mean()
+
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            optimizer.step()
+
+            if global_step < warmup_steps:
+                lr_scale = (global_step + 1) / warmup_steps
+                for pg in optimizer.param_groups:
+                    pg["lr"] = lr * lr_scale
+
+            ema.update(model)
+            total_loss  += loss.item()
+            n_batches   += 1
+            global_step += 1
+
+        avg_loss = total_loss / n_batches
+        scheduler.step()
+
+        # ── Every epoch: quick rough FDE (5 batches ~320 samples) ─────────
+        rough_fde = validate(ema, val_loader, device, feat_std, max_batches=5)
+
+        # ── Every 5 epochs: proper FDE (20 batches ~1280 samples) ─────────
+        if (epoch + 1) % 5 == 0:
+            proper_fde = validate(ema, val_loader, device, feat_std, max_batches=20)
+            print(f"Epoch {epoch+1:03d} | loss {avg_loss:.4f} | "
+                  f"rough FDE {rough_fde:.1f}m | proper FDE {proper_fde:.1f}m")
+
+            checkpoint = {
+                "epoch":           epoch,
+                "model_state":     model.state_dict(),
+                "ema_state":       ema.shadow.state_dict(),
+                "optimizer_state": optimizer.state_dict(),
+                "scheduler_state": scheduler.state_dict(),
+                "val_fde":         proper_fde,
+            }
+            torch.save(checkpoint, output_dir / "last.pt")
+
+            if proper_fde < best_fde:
+                best_fde = proper_fde
+                torch.save(checkpoint, output_dir / "best.pt")
+                print(f"  ✓ best model saved (minFDE {best_fde:.1f}m)")
+        else:
+            print(f"Epoch {epoch+1:03d} | loss {avg_loss:.4f} | rough FDE {rough_fde:.1f}m")
+
+            checkpoint = {
+                "epoch":           epoch,
+                "model_state":     model.state_dict(),
+                "ema_state":       ema.shadow.state_dict(),
+                "optimizer_state": optimizer.state_dict(),
+                "scheduler_state": scheduler.state_dict(),
+                "val_fde":         None,
+            }
+            torch.save(checkpoint, output_dir / "last.pt")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--nc_path", type=str, required=True,
+                         help="Path to the .nc trajectory dataset")
+    parser.add_argument("--output_dir", type=str, default="checkpoints_cfm_rope_og")
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--d_model", type=int, default=256)
+    parser.add_argument("--n_layers", type=int, default=6)
+    parser.add_argument("--subset", type=int, default=None,
+                         help="Limit to N samples; omit for the full dataset")
+    args = parser.parse_args()
+
+    train(
+        nc_path    = args.nc_path,
+        output_dir = args.output_dir,
+        epochs     = args.epochs,
+        batch_size = args.batch_size,
+        d_model    = args.d_model,
+        n_layers   = args.n_layers,
+        subset     = args.subset,
+    )
