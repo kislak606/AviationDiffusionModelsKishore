@@ -21,15 +21,15 @@ from DataLoaders.ADSBdataset import get_dataloaders
 from models.cfm import euler_sample
 
 RUNS = {
-    "Sinusoidal": ("models.dit", {
-        "best": "checkpoints_cfm/best.pt",
-        "last": "checkpoints_cfm/last.pt"}),
+    #"Sinusoidal": ("models.dit", {
+    #    "best": "checkpoints_cfm/best.pt",
+    #    "last": "checkpoints_cfm/last.pt"}),
     "RoPE-OG": ("models.dit_RoPE_original", {
         "best": "checkpoints_cfm_rope_og/best_rope_og.pt",
         "last": "checkpoints_cfm_rope_og/last_rope_og.pt"}),
-    "RoPE-TS": ("models.dit_RoPE_timestamps", {
-        "best": "checkpoints_cfm_rope_ts/best_rope_ts.pt",
-        "last": "checkpoints_cfm_rope_ts/last_rope_ts.pt"}),
+    #"RoPE-TS": ("models.dit_RoPE_timestamps", {
+    #    "best": "checkpoints_cfm_rope_ts/best_rope_ts.pt",
+    #    "last": "checkpoints_cfm_rope_ts/last_rope_ts.pt"}),
 }
 
 
