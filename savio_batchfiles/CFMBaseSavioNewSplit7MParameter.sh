@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=cfm_newsplit_s0
-#SBATCH --account=fc_mixedav          # confirm with sacctmgr (script had ac_mixedav)
+#SBATCH --account=fc_mixedav
 #SBATCH --partition=savio3_gpu
 #SBATCH --qos=gtx2080_gpu3_normal
 #SBATCH --gres=gpu:GTX2080TI:1
@@ -19,10 +19,10 @@ source activate adsb
 python -c "import torch; assert torch.cuda.is_available(), 'no CUDA'; print('Device:', torch.cuda.get_device_name(0))" || { echo "CUDA check failed, aborting"; exit 1; }
 
 NC_PATH=/global/scratch/users/kishore26/adsb-diffusion/data/trajectories_adsblol_seq86_stage2.nc
-OUTPUT_DIR=/global/scratch/users/kishore26/adsb-diffusion/checkpoints_cfm_newSplit_s0
+OUTPUT_DIR=$HOME/checkpoints_cfm_newSplit_s0
 mkdir -p $OUTPUT_DIR
 
-cd /global/scratch/users/kishore26/adsb-diffusion/AviationDiffusionModelsKishore/training
+cd $HOME/AviationDiffusionModelsKishore/training
 
 python -u trainCFMBaseNewSplitSavio.py \
     --nc_path $NC_PATH \
