@@ -17,16 +17,19 @@ import torch
 import netCDF4 as nc
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from DataLoaders.ADSBdataset import get_dataloaders
+from DataLoaders.ADSBdatasetBase import get_dataloaders   # new (mentor's) flight-level split
 from models.cfm import euler_sample
 
 RUNS = {
     #"Sinusoidal": ("models.dit", {
     #    "best": "checkpoints_cfm/best.pt",
     #    "last": "checkpoints_cfm/last.pt"}),
-    "RoPE-OG": ("models.dit_RoPE_original", {
-        "best": "checkpoints_cfm_rope_og/best_rope_og.pt",
-        "last": "checkpoints_cfm_rope_og/last_rope_og.pt"}),
+    "CFM-NewSplit": ("models.dit", {
+        "best": "checkpoints_cfm_newSplit/best_cfm_newsplit_s0.pt",
+        "last": "checkpoints_cfm_newSplit/last_cfm_newsplit_s0.pt"}),
+    #"RoPE-OG": ("models.dit_RoPE_original", {
+    #    "best": "checkpoints_cfm_rope_og/best_rope_og.pt",
+    #    "last": "checkpoints_cfm_rope_og/last_rope_og.pt"}),
     #"RoPE-TS": ("models.dit_RoPE_timestamps", {
     #    "best": "checkpoints_cfm_rope_ts/best_rope_ts.pt",
     #    "last": "checkpoints_cfm_rope_ts/last_rope_ts.pt"}),
@@ -50,7 +53,7 @@ def load_model(module_name, ckpt_path, device):
 @torch.no_grad()
 def evaluate(model, loader, std, device, K, steps, max_batches, seed):
     torch.manual_seed(seed)
-    fde_min, fde_mean, ade_min, ade_mean = [], [], [], []
+    fde_min, fde_mean, ade_min, ade_mean, fde_one = [], [], [], [], []
     hor_min, hor_mean = [], []
     for i, b in enumerate(loader):
         if max_batches and i >= max_batches:
@@ -59,11 +62,12 @@ def evaluate(model, loader, std, device, K, steps, max_batches, seed):
         preds = euler_sample(model, obs, trel, n_samples=K, n_steps=steps, device=str(device))
         err = torch.norm(preds[..., :2] * std - (fut[..., :2] * std)[None], dim=-1)  # (K,B,43)
         fde, ade = err[:, :, -1], err.mean(-1)                                       # (K,B)
+        fde_one.append(fde[0].cpu())   # 1-sample FDE: first sampled trajectory only
         fde_min.append(fde.min(0).values.cpu());  fde_mean.append(fde.mean(0).cpu())
         ade_min.append(ade.min(0).values.cpu());  ade_mean.append(ade.mean(0).cpu())
         hor_min.append(err.min(0).values.cpu());  hor_mean.append(err.mean(0).cpu())
     cat = lambda xs: torch.cat(xs).numpy()
-    return dict(minFDE=cat(fde_min), meanFDE=cat(fde_mean), minADE=cat(ade_min),
+    return dict(FDE1=cat(fde_one), minFDE=cat(fde_min), meanFDE=cat(fde_mean), minADE=cat(ade_min),
                 meanADE=cat(ade_mean), hor_min=cat(hor_min), hor_mean=cat(hor_mean))
 
 
@@ -151,6 +155,10 @@ def main():
                     **meta,
                     "minFDE": float(f.mean()), "minFDE_median": float(np.median(f)),
                     "minFDE_p90": float(np.percentile(f, 90)),
+                    "FDE1": float(r["FDE1"].mean()), "FDE1_median": float(np.median(r["FDE1"])),
+                    "FDE1_p90": float(np.percentile(r["FDE1"], 90)),
+                    "FDE1_p99": float(np.percentile(r["FDE1"], 99)),
+                    "minFDE_p99": float(np.percentile(f, 99)),
                     "minADE": float(r["minADE"].mean()),
                     "meanFDE": float(r["meanFDE"].mean()), "meanADE": float(r["meanADE"].mean()),
                     "n": int(len(f)),
@@ -176,6 +184,10 @@ def main():
             if "/" in k:
                 print(f"| {k} | {v['epoch']} | {v['minFDE']:.1f} | {v['minFDE_median']:.1f} | {v['minFDE_p90']:.1f} | "
                       f"{v['minADE']:.1f} | {v['meanFDE']:.1f} | {v['meanADE']:.1f} |")
+        print("\n1-sample FDE (m)\n| run | mean | median | p90 | p99 |\n|---|---|---|---|---|")
+        for k, v in s.items():
+            if "/" in k:
+                print(f"| {k} | {v['FDE1']:.1f} | {v['FDE1_median']:.1f} | {v['FDE1_p90']:.1f} | {v['FDE1_p99']:.1f} |")
         print("baselines:", s["baselines"])
         print("paired diffs (negative = first is better):", s.get("paired_minFDE_diff"))
 
