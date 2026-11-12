@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from DataLoaders.ADSBdatasetBase import get_dataloaders
-from models.dit_RoPETS_impose import TrajectoryDiT
+from models.ditRoPETS_impose import TrajectoryDiT
 from models.cfm_impose import (sample_flow_time, sample_impose_mask, forward_cfm_impose,
                                cfm_loss_impose, euler_sample_impose)
 
