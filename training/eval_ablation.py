@@ -116,6 +116,7 @@ def main():
     a = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("device:", device, torch.cuda.get_device_name(0) if device.type == "cuda" else "(CPU - will be very slow)")
     out = Path(a.out); out.mkdir(exist_ok=True)
 
     ds = nc.Dataset(a.nc_path, "r")
